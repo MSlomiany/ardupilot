@@ -171,7 +171,7 @@ This cached $V_{TAS,\text{last}}$ is what the DCM synthetic airspeed path later 
 
 Both the real-sensor path and the synthetic path can be clipped against ground speed when \texttt{AHRS\_WIND\_MAX} is positive.
 
-Let $V_g$ be ground speed magnitude. Then:
+Let $V_g$ be ground speed magnitude and let $W_{\max}$ denote the parameter value \texttt{AHRS\_WIND\_MAX}. Then:
 \begin{align}
 V_{TAS,\min} &= \max(0, V_g - W_{\max}) \\
 V_{TAS,\max} &= \max(V_{TAS,\min}, V_g + W_{\max})
@@ -215,7 +215,7 @@ TECS uses airspeed if
 \texttt{one\_shot\_synthetic\_request}
 \end{equation}
 
-If that condition is false, or if AHRS does not return a fresh estimate, TECS falls back to:
+If that condition is false, or if AHRS only has a cached stale estimate and therefore reports the result as not fresh to TECS, TECS falls back to:
 \begin{equation}
 V_{EAS} \leftarrow \operatorname{constrain}(V_{\text{cruise}}, V_{\min}, V_{\max})
 \end{equation}
