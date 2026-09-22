@@ -231,8 +231,8 @@ The longitudinal acceleration proxy is:
 \begin{equation}
 \dot{V}_x \approx \texttt{rotMat.c.x}\,g + a_x
 \end{equation}
-where \texttt{rotMat} is exactly the matrix returned by \texttt{\_ahrs.get\_rotation\_body\_to\_ned()}, \texttt{rotMat.c.x} is exactly the matrix element used in the implementation, and $a_x$ is the measured body-axis forward acceleration from \texttt{AP::ins().get\_accel().x}.
-In the library's convention, \texttt{rotMat.c.x} is the $(x,c)$ entry of that body-to-NED direction cosine matrix, i.e. the NED-$x$ component of the matrix's third column. The note keeps this implementation-level convention explicitly so the sign and axis mapping match the code exactly.
+where \texttt{rotMat} is exactly the matrix returned by \texttt{\_ahrs.get\_rotation\_body\_to\_ned()}, \texttt{rotMat.c.x} is exactly the named \texttt{Matrix3f} field dereferenced by the implementation, and $a_x$ is the measured body-axis forward acceleration from \texttt{AP::ins().get\_accel().x}.
+The note intentionally keeps the term \texttt{rotMat.c.x} in this implementation-level form instead of translating it into alternate matrix notation, so the sign and frame convention stay identical to the code path being documented.
 
 Let:
 \begin{align}
