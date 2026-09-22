@@ -87,6 +87,7 @@ If EKF3 provides both wind and inertial navigation velocity, AHRS computes:
 V_{TAS} &= \left\lVert \vec{V}_{air}^{\,TAS} \right\rVert \\
 V_{EAS} &= \frac{V_{TAS}}{\text{EAS2TAS}}
 \end{align}
+After this, the same \texttt{AHRS\_WIND\_MAX} clipping described in Section~\ref{sec:windmax_clip} may further constrain the result.
 
 \paragraph{DCM fallback path.}
 If EKF3 synthetic airspeed is unavailable, AHRS falls back to the DCM backend. DCM returns the cached last true airspeed estimate:
@@ -168,6 +169,7 @@ V_{TAS,\text{last}} = \max\left((\vec{V}_{air}^{\,body})_x,\,0\right)
 This cached $V_{TAS,\text{last}}$ is what the DCM synthetic airspeed path later converts back to EAS.
 
 \section{Airspeed clipping with \texttt{AHRS\_WIND\_MAX}}
+\label{sec:windmax_clip}
 
 Both the real-sensor path and the synthetic path can be clipped against ground speed when \texttt{AHRS\_WIND\_MAX} is positive.
 
@@ -226,9 +228,9 @@ TECS converts the selected EAS to TAS and updates its internal TAS state with a 
 
 The longitudinal acceleration proxy is:
 \begin{equation}
-\dot{V}_x \approx R_{31}\,g + a_x
+\dot{V}_x \approx \texttt{rotMat.c.x}\,g + a_x
 \end{equation}
-where $R_{31}$ is the forward-axis gravity projection from the body-to-NED rotation matrix, and $a_x$ is measured body-axis acceleration.
+where \texttt{rotMat} is exactly the matrix returned by \texttt{\_ahrs.get\_rotation\_body\_to\_ned()}, \texttt{rotMat.c.x} is exactly the matrix element used in the implementation, and $a_x$ is the measured body-axis forward acceleration from \texttt{AP::ins().get\_accel().x}.
 
 Let:
 \begin{align}
