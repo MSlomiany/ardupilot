@@ -1,0 +1,267 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{Synthetic Airspeed in ArduPlane}
+\author{AI-assisted repository analysis}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Scope}
+
+This note describes how ArduPlane computes and uses \emph{synthetic airspeed} without modifying the flight code.
+The analysis is based on the current implementation in:
+\begin{itemize}
+    \item \texttt{/home/runner/work/ardupilot/ardupilot/ArduPlane/system.cpp}
+    \item \texttt{/home/runner/work/ardupilot/ardupilot/ArduPlane/Plane.cpp}
+    \item \texttt{/home/runner/work/ardupilot/ardupilot/libraries/AP\_AHRS/AP\_AHRS.cpp}
+    \item \texttt{/home/runner/work/ardupilot/ardupilot/libraries/AP\_AHRS/AP\_AHRS\_DCM.cpp}
+    \item \texttt{/home/runner/work/ardupilot/ardupilot/libraries/AP\_TECS/AP\_TECS.cpp}
+    \item \texttt{/home/runner/work/ardupilot/ardupilot/libraries/AP\_Baro/AP\_Baro\_atmosphere.cpp}
+\end{itemize}
+
+\section{High-level workflow}
+
+\begin{enumerate}
+    \item ArduPlane enables wind estimation during startup.
+    \item AHRS updates and maintains:
+    \begin{itemize}
+        \item a wind estimate,
+        \item a cached equivalent airspeed (EAS),
+        \item a cached true airspeed (TAS),
+        \item a flag describing whether the current estimate came from a real sensor or a synthetic source.
+    \end{itemize}
+    \item TECS runs at 50 Hz. It decides whether to use airspeed at all:
+    \begin{itemize}
+        \item always if a healthy airspeed sensor is active,
+        \item optionally if \texttt{TECS\_SYNAIRSPEED} is enabled,
+        \item or for one cycle in special QuadPlane transitions.
+    \end{itemize}
+    \item If TECS asks AHRS for airspeed, AHRS returns:
+    \begin{enumerate}
+        \item real sensor EAS when allowed,
+        \item otherwise EKF3 synthetic EAS if wind and navigation velocity are available,
+        \item otherwise DCM synthetic EAS,
+        \item otherwise no fresh estimate.
+    \end{enumerate}
+    \item TECS converts the returned EAS to TAS and feeds it into its complementary speed filter.
+\end{enumerate}
+
+\section{Plane-side enablement}
+
+At startup, ArduPlane explicitly enables fixed-wing wind estimation:
+\begin{equation}
+\texttt{ahrs.set\_fly\_forward(true)}, \qquad
+\texttt{ahrs.set\_wind\_estimation\_enabled(true)}
+\end{equation}
+
+TECS is executed from \texttt{Plane::update\_speed\_height()} at 50 Hz:
+\begin{equation}
+\texttt{TECS\_controller.update\_50hz()}
+\end{equation}
+
+\section{AHRS airspeed selection logic}
+
+\subsection{When a real sensor is used}
+
+AHRS uses the airspeed sensor only if it is both enabled and healthy. For fixed-wing flight, AHRS can still reject that sensor when the EKF reports airspeed rejection and the vehicle is not dead reckoning.
+
+If the real sensor is accepted, the returned equivalent airspeed is
+\begin{equation}
+V_{EAS} = V_{\text{sensor}}
+\end{equation}
+possibly clipped by \texttt{AHRS\_WIND\_MAX}, as described later.
+
+\subsection{When synthetic airspeed is used}
+
+If no sensor is used and wind estimation is enabled, AHRS tries to synthesize airspeed.
+
+\paragraph{EKF3 path.}
+If EKF3 provides both wind and inertial navigation velocity, AHRS computes:
+\begin{align}
+\vec{V}_{air}^{\,TAS} &= \vec{V}_{nav}^{\,NED} - \vec{V}_{wind}^{\,NED} \\
+V_{TAS} &= \left\lVert \vec{V}_{air}^{\,TAS} \right\rVert \\
+V_{EAS} &= \frac{V_{TAS}}{\text{EAS2TAS}}
+\end{align}
+
+\paragraph{DCM fallback path.}
+If EKF3 synthetic airspeed is unavailable, AHRS falls back to the DCM backend. DCM returns the cached last true airspeed estimate:
+\begin{equation}
+V_{EAS} = V_{TAS,\text{last}} \cdot \text{TAS2EAS}
+\end{equation}
+where
+\begin{equation}
+\text{TAS2EAS} = \frac{1}{\text{EAS2TAS}}
+\end{equation}
+
+If no new velocity-based estimate is available, the same cached value is still returned internally, but marked as not fresh.
+
+\section{Wind estimation used by the synthetic path}
+
+\subsection{DCM wind update trigger}
+
+DCM updates its wind estimate when a new GPS sample arrives with a 3D fix. The update call is further rate-limited to at most 10 Hz.
+
+\subsection{Wind from turning flight}
+
+When the fuselage direction changes enough, DCM estimates wind from the wind triangle during turning flight.
+
+Define:
+\begin{align}
+\Delta \vec{f} &= \vec{f}_k - \vec{f}_{k-1} \\
+\Delta \vec{v} &= \vec{v}_k - \vec{v}_{k-1} \\
+\vec{f}_{\Sigma} &= \vec{f}_k + \vec{f}_{k-1} \\
+\vec{v}_{\Sigma} &= \vec{v}_k + \vec{v}_{k-1}
+\end{align}
+where $\vec{f}$ is the body forward direction expressed in earth axes and $\vec{v}$ is ground velocity.
+
+The code computes the scalar airspeed estimate
+\begin{equation}
+V = \frac{\left\lVert \Delta \vec{v} \right\rVert}{\left\lVert \Delta \vec{f} \right\rVert}
+\end{equation}
+and the angular difference
+\begin{equation}
+\theta = \operatorname{atan2}(\Delta v_y, \Delta v_x) - \operatorname{atan2}(\Delta f_y, \Delta f_x)
+\end{equation}
+
+Then the wind estimate is:
+\begin{align}
+W_x &= \frac{1}{2}\left(v_{\Sigma x} - V(\cos\theta \, f_{\Sigma x} - \sin\theta \, f_{\Sigma y})\right) \\
+W_y &= \frac{1}{2}\left(v_{\Sigma y} - V(\sin\theta \, f_{\Sigma x} + \cos\theta \, f_{\Sigma y})\right) \\
+W_z &= \frac{1}{2}\left(v_{\Sigma z} - V f_{\Sigma z}\right)
+\end{align}
+
+If the new estimate is not too far from the current one, DCM low-pass filters it:
+\begin{equation}
+\vec{W}_{k} = 0.95\,\vec{W}_{k-1} + 0.05\,\vec{W}_{\text{new}}
+\end{equation}
+
+\subsection{Wind from straight flight with a real airspeed sensor}
+
+If the aircraft has been approximately straight for long enough and a real airspeed sensor is available, DCM forms:
+\begin{align}
+\vec{V}_{air}^{\,TAS} &= \hat{f}\,V_{\text{sensor}}\,\text{EAS2TAS} \\
+\vec{W}_{\text{new}} &= \vec{V}_{ground} - \vec{V}_{air}^{\,TAS}
+\end{align}
+and filters it as
+\begin{equation}
+\vec{W}_{k} = 0.92\,\vec{W}_{k-1} + 0.08\,\vec{W}_{\text{new}}
+\end{equation}
+
+\section{How DCM obtains the cached synthetic airspeed}
+
+When GPS is available, DCM keeps a last airspeed estimate for dead reckoning by subtracting wind from velocity:
+\begin{align}
+\vec{V}_{air}^{\,NED} &= \vec{V}_{ground}^{\,NED} - \vec{W}^{\,NED} \\
+\vec{V}_{air}^{\,body} &= R_{NED\rightarrow body}\,\vec{V}_{air}^{\,NED}
+\end{align}
+
+Then it mimics a pitot tube by taking only the positive forward-body component:
+\begin{equation}
+V_{TAS,\text{last}} = \max\left((\vec{V}_{air}^{\,body})_x,\,0\right)
+\end{equation}
+
+This cached $V_{TAS,\text{last}}$ is what the DCM synthetic airspeed path later converts back to EAS.
+
+\section{Airspeed clipping with \texttt{AHRS\_WIND\_MAX}}
+
+Both the real-sensor path and the synthetic path can be clipped against ground speed when \texttt{AHRS\_WIND\_MAX} is positive.
+
+Let $V_g$ be ground speed magnitude. Then:
+\begin{align}
+V_{TAS,\min} &= \max(0, V_g - W_{\max}) \\
+V_{TAS,\max} &= \max(V_{TAS,\min}, V_g + W_{\max})
+\end{align}
+and
+\begin{equation}
+V_{TAS} \leftarrow \operatorname{constrain}(V_{TAS}, V_{TAS,\min}, V_{TAS,\max})
+\end{equation}
+followed by
+\begin{equation}
+V_{EAS} = \frac{V_{TAS}}{\text{EAS2TAS}}
+\end{equation}
+
+\section{EAS/TAS conversion}
+
+ArduPilot uses the barometer library for the conversion between equivalent and true airspeed.
+
+The active scale factor is:
+\begin{equation}
+\text{EAS2TAS} = \sqrt{\frac{\rho_0}{\rho}}
+\end{equation}
+where $\rho_0$ is sea-level standard air density and $\rho$ is the estimated current air density.
+
+Therefore:
+\begin{align}
+V_{TAS} &= V_{EAS}\,\text{EAS2TAS} \\
+V_{EAS} &= \frac{V_{TAS}}{\text{EAS2TAS}}
+\end{align}
+
+\section{How TECS uses the synthetic airspeed}
+
+\subsection{TECS airspeed enable condition}
+
+TECS uses airspeed if
+\begin{equation}
+\texttt{using\_airspeed} =
+\texttt{AHRS\_has\_real\_sensor}
+\;\vee\;
+\texttt{TECS\_SYNAIRSPEED}
+\;\vee\;
+\texttt{one\_shot\_synthetic\_request}
+\end{equation}
+
+If that condition is false, or if AHRS does not return a fresh estimate, TECS falls back to:
+\begin{equation}
+V_{EAS} \leftarrow \operatorname{constrain}(V_{\text{cruise}}, V_{\min}, V_{\max})
+\end{equation}
+
+\subsection{TECS speed complementary filter}
+
+TECS converts the selected EAS to TAS and updates its internal TAS state with a second-order complementary filter.
+
+The longitudinal acceleration proxy is:
+\begin{equation}
+\dot{V}_x \approx R_{31}\,g + a_x
+\end{equation}
+where $R_{31}$ is the forward-axis gravity projection from the body-to-NED rotation matrix, and $a_x$ is measured body-axis acceleration.
+
+Let:
+\begin{align}
+e_V &= V_{EAS}\,\text{EAS2TAS} - V_{TAS,\text{state}} \\
+\omega &= \texttt{TECS\_SPD\_OMEGA}
+\end{align}
+
+Then TECS computes:
+\begin{align}
+I_V(k+1) &= I_V(k) + e_V\,\omega^2\,\Delta t \\
+u_V &= I_V + \dot{V}_x + 1.4142\,\omega\,e_V \\
+V_{TAS,\text{state}}(k+1) &= V_{TAS,\text{state}}(k) + u_V\,\Delta t
+\end{align}
+
+Finally, TECS enforces:
+\begin{equation}
+V_{TAS,\text{state}} \ge 3 \text{ m/s}
+\end{equation}
+
+So synthetic airspeed does not directly command throttle or pitch. Instead, it becomes the measured speed input for TECS's TAS state estimate, and that state is what the energy controller uses afterward.
+
+\section{Practical summary}
+
+\begin{itemize}
+    \item In Plane, synthetic airspeed is fundamentally a wind-triangle estimate.
+    \item EKF3 synthetic airspeed is the cleanest path:
+    \[
+    \vec{V}_{air} = \vec{V}_{nav} - \vec{W}
+    \]
+    \item DCM fallback relies on a cached forward TAS estimate built from GPS velocity minus wind, then converted back to EAS.
+    \item TECS only consumes synthetic airspeed when explicitly allowed, except for specific transition cases.
+    \item If no acceptable airspeed estimate is available, TECS falls back to cruise airspeed rather than trusting stale or absent data.
+\end{itemize}
+
+\end{document}
