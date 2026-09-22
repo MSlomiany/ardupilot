@@ -217,10 +217,11 @@ TECS uses airspeed if
 \texttt{one\_shot\_synthetic\_request}
 \end{equation}
 
-If that condition is false, or if AHRS only has a cached stale estimate and therefore reports the result as not fresh to TECS, TECS falls back to:
+If that condition is false, or if AHRS only has a cached stale estimate and therefore reports the result as not fresh to TECS, then TECS substitutes a constrained cruise EAS \emph{as the measurement input to its speed update path}:
 \begin{equation}
-V_{EAS} \leftarrow \operatorname{constrain}(V_{\text{cruise}}, V_{\min}, V_{\max})
+\tilde{V}_{EAS} = \operatorname{constrain}(V_{\text{cruise}}, V_{\min}, V_{\max})
 \end{equation}
+This is not a direct final controller state assignment. On reset it seeds the TAS state, and otherwise it is the measurement term fed into the complementary-filter equations below.
 
 \subsection{TECS speed complementary filter}
 
@@ -231,6 +232,7 @@ The longitudinal acceleration proxy is:
 \dot{V}_x \approx \texttt{rotMat.c.x}\,g + a_x
 \end{equation}
 where \texttt{rotMat} is exactly the matrix returned by \texttt{\_ahrs.get\_rotation\_body\_to\_ned()}, \texttt{rotMat.c.x} is exactly the matrix element used in the implementation, and $a_x$ is the measured body-axis forward acceleration from \texttt{AP::ins().get\_accel().x}.
+In the library's convention, \texttt{rotMat.c.x} is the $(x,c)$ entry of that body-to-NED direction cosine matrix, i.e. the NED-$x$ component of the matrix's third column. The note keeps this implementation-level convention explicitly so the sign and axis mapping match the code exactly.
 
 Let:
 \begin{align}
