@@ -6,7 +6,6 @@
 \usepackage{hyperref}
 
 \title{Synthetic Airspeed in ArduPlane}
-\author{AI-assisted repository analysis}
 \date{}
 
 \begin{document}
@@ -17,12 +16,12 @@
 This note describes how ArduPlane computes and uses \emph{synthetic airspeed} without modifying the flight code.
 The analysis is based on the current implementation in:
 \begin{itemize}
-    \item \texttt{/home/runner/work/ardupilot/ardupilot/ArduPlane/system.cpp}
-    \item \texttt{/home/runner/work/ardupilot/ardupilot/ArduPlane/Plane.cpp}
-    \item \texttt{/home/runner/work/ardupilot/ardupilot/libraries/AP\_AHRS/AP\_AHRS.cpp}
-    \item \texttt{/home/runner/work/ardupilot/ardupilot/libraries/AP\_AHRS/AP\_AHRS\_DCM.cpp}
-    \item \texttt{/home/runner/work/ardupilot/ardupilot/libraries/AP\_TECS/AP\_TECS.cpp}
-    \item \texttt{/home/runner/work/ardupilot/ardupilot/libraries/AP\_Baro/AP\_Baro\_atmosphere.cpp}
+    \item \texttt{ArduPlane/system.cpp}
+    \item \texttt{ArduPlane/Plane.cpp}
+    \item \texttt{libraries/AP\_AHRS/AP\_AHRS.cpp}
+    \item \texttt{libraries/AP\_AHRS/AP\_AHRS\_DCM.cpp}
+    \item \texttt{libraries/AP\_TECS/AP\_TECS.cpp}
+    \item \texttt{libraries/AP\_Baro/AP\_Baro\_atmosphere.cpp}
 \end{itemize}
 
 \section{High-level workflow}
