@@ -1,0 +1,145 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{url}
+
+\title{ArduPlane Elevon Mixing: Software Overview and Sign Convention}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Scope}
+
+This note describes the fixed-wing Plane elevon mixer in the current ArduPilot
+source. It covers the logical mixing performed in software; it does not prescribe
+airframe-specific servo installation, linkage geometry, or flight tuning.
+The principal implementation is
+\url{ArduPlane/servos.cpp}, in \texttt{Plane::channel\_function\_mixer()} and
+\texttt{Plane::servos\_output()}.
+
+\section{Signal path in different modes}
+
+Elevon mixing combines two logical control demands: aileron (roll) and elevator
+(pitch). The source of those demands depends on the flight mode, but the
+elevon output mixer is in the common servo-output path.
+
+\begin{itemize}
+  \item In \textbf{MANUAL}, \texttt{ModeManual::update()} writes the RC roll and
+  pitch inputs, with the configured manual expo, to the logical aileron and
+  elevator outputs. It does not run the normal attitude stabilization
+  controllers for these axes.
+  \item In \textbf{stabilized modes}, such as FBWA, the attitude controllers
+  calculate the logical aileron and elevator demands. For example,
+  \texttt{stabilize\_roll()} and \texttt{stabilize\_pitch()} write their
+  controller outputs to those logical functions.
+  \item In \textbf{automatic modes}, the mode's navigation and attitude control
+  determine the demands; the same logical aileron/elevator output functions are
+  ultimately used by the mixer. AUTO is therefore not a separate elevon mixing
+  formula.
+\end{itemize}
+
+In the normal Plane output path, \texttt{servos\_output()} calls the mixer with
+aileron and elevator as inputs and left and right elevons as outputs. Servo
+function assignments route the resulting logical outputs to physical outputs:
+\texttt{SERVO\textit{n}\_FUNCTION}=77 selects ElevonLeft and 78 selects
+ElevonRight. The function values are defined in
+\texttt{libraries/SRV\_Channel/SRV\_Channel.h}.
+
+\section{Mixing equations}
+
+Let \(a\) and \(e\) be the scaled aileron and elevator demands read by the
+mixer. In the following, positive and negative refer to ArduPilot's logical
+scaled values, not a transmitter's stick direction or a particular linkage.
+The parameter \texttt{MIXING\_OFFSET} optionally adjusts the relative input
+gains. For offset \(o\), in percentage points, define
+\[
+(a',e') =
+\begin{cases}
+(a,\;e(100-o)/100), & o < 0,\\
+(a,\;e), & o = 0,\\
+(a(100+o)/100,\;e), & o > 0.
+\end{cases}
+\]
+Thus a positive offset increases the aileron contribution; a negative offset
+increases the elevator contribution. The implementation then computes
+\[
+\begin{aligned}
+L &= \operatorname{clip}_{[-4500,4500]}\bigl(g(e'-a')\bigr),\\
+R &= \operatorname{clip}_{[-4500,4500]}\bigl(g(e'+a')\bigr),
+\end{aligned}
+\]
+where \(L\) and \(R\) are the left and right scaled elevon outputs and \(g\)
+is \texttt{MIXING\_GAIN}. The default gain is \(0.5\). Clipping is applied
+separately to each output, so a sufficiently large combined demand can saturate
+one or both elevons.
+
+With zero offset and before clipping, the equations can also be inverted:
+\[
+e = \frac{L+R}{2g}, \qquad a = \frac{R-L}{2g}.
+\]
+This shows the symmetric component (pitch) in the sum and the differential
+component (roll) in the right-minus-left difference.
+
+\section{Deflection sign convention}
+
+The mixer source comments that its output order is chosen so that
+\textbf{non-reversed servos go ``up''}, and that the first output is the
+\textbf{left} channel. Interpreting positive scaled elevon output as an upward
+surface command for a correctly installed, non-reversed output gives:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Logical demand & Left elevon & Right elevon\\
+\midrule
+Positive elevator only (\(a=0,e>0\)) & Up & Up\\
+Positive aileron only (\(a>0,e=0\)) & Down & Up\\
+Negative aileron only (\(a<0,e=0\)) & Up & Down\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Accordingly, positive aileron produces the differential pattern for a
+right-roll command: left down, right up. Positive elevator produces equal
+upward commands on both sides. These are mixer-level signs. The pilot's stick
+direction depends on RC mapping and input configuration, while the final
+physical movement depends on servo orientation, linkage, output type, and
+\texttt{SERVO\textit{n}\_REVERSED}. The mixer comment describes the intended
+non-reversed convention; it cannot guarantee that a particular airframe moves
+correctly. Verify actual movement on the assembled aircraft before flight.
+
+\section{Output scaling and configuration notes}
+
+The mixer works on scaled logical values, then the servo-channel layer converts
+them to PWM using each output's configured limits and type. For angle-style
+outputs, positive scaled values increase PWM from trim unless the output is
+reversed; reversal changes the final sign/direction. Mechanical travel and
+endpoint configuration therefore affect the physical result, not the
+logical mixing equation.
+
+\texttt{MIXING\_GAIN} defaults to \(0.5\), reducing the chance that simultaneous
+full roll and pitch inputs saturate an output; raising it increases travel but
+can cause clipping. \texttt{MIXING\_OFFSET} changes the relative response to
+roll and pitch as defined above. For unusual transmitter-side mixing,
+\texttt{MANUAL\_RCMASK} can copy selected radio inputs directly to corresponding
+outputs in MANUAL after the normal mixer runs. Those selected output channels
+may consequently bypass the expected software elevon result in MANUAL.
+
+\section{Source references}
+
+\begin{itemize}
+  \item \url{ArduPlane/mode_manual.cpp}: MANUAL input forwarding.
+  \item \url{ArduPlane/Attitude.cpp}: stabilized roll and pitch outputs.
+  \item \url{ArduPlane/servos.cpp}: elevon mixer, common output path, and
+  \texttt{MANUAL\_RCMASK} handling.
+  \item \url{ArduPlane/Parameters.cpp}: \texttt{MIXING\_GAIN},
+  \texttt{MIXING\_OFFSET}, and \texttt{MANUAL\_RCMASK} parameter descriptions.
+  \item \url{libraries/SRV\_Channel/SRV\_Channel.cpp}: scaled-output to PWM
+  conversion and output reversal.
+\end{itemize}
+
+\end{document}
